@@ -149,7 +149,7 @@ _returncode = _p.wait()
 
 # $HOME/.bassh_history
 BASSH_HISTORY = os.path.join(os.environ.get('HOME'), '.bassh_history', )
-with file(BASSH_HISTORY, 'wa', ) as _f :
+with file(BASSH_HISTORY, 'a', ) as _f :
     _writer = csv.writer(_f, dialect='excel', )
     _writer.writerow(
             (
