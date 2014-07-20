@@ -105,9 +105,9 @@ if _options.bassh_comp :
     try :
         _keyword = _arguments[1]
     except IndexError :
-        print '**nothing**'
+        #print '**nothing**'
         sys.exit(0, )
-    
+
 
     # digg in hostnames
     if _search_in_hostnames :
