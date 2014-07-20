@@ -1,0 +1,166 @@
+#!/usr/bin/env python
+
+import os
+import csv
+import datetime
+import string
+import sys
+import logging
+import subprocess
+import argparse
+
+from bassh import _ssh
+
+
+class ArgumentParser (argparse.ArgumentParser, ) :
+    def parse_args (self, args=None, namespace=None, ) :
+        args, argv = self.parse_known_args(args, namespace)
+        return args
+
+    def print_usage (self, *a, **kw) :
+        pass
+
+
+################################################################################
+# ARGUMENT
+_parser = ArgumentParser(add_help=False, version=None, )
+_parser.add_argument('ssh arguments', type=str, nargs='*', help='arguments', )
+_parser.add_argument('-F', metavar='config_file', type=str, help='set the non-default config file path', default=None, )
+_parser.add_argument('--bassh-loglevel', type=str, help='log level', default='info', choices=('info', 'debug', 'error', 'warning', 'critical', 'notset', ), )
+_parser.add_argument('--bassh-comp', action='store_true', help='return the bash completion array', default=False, )
+_parser.add_argument('--bassh-version', action='version', default=argparse.SUPPRESS, )
+_parser.add_argument('--bassh-help', action='help', default=argparse.SUPPRESS, )
+
+_options = _parser.parse_args()
+
+################################################################################
+# LOGGING
+_log_level = getattr(logging, _options.bassh_loglevel.upper(), )
+if _options.bassh_comp :
+    _log_level = logging.NOTSET
+
+log = logging.getLogger('bassh', )
+log.setLevel(_log_level, ) # default is critical
+_handler = logging.StreamHandler(sys.stdout, )
+_handler.setFormatter(logging.Formatter(fmt='%(asctime)-15s [%(name)s:%(levelname)s] %(message)s (`%(module)s.%(funcName)s`:L%(lineno)d)', ), )
+log.addHandler(_handler, )
+log.propagate = False
+
+
+log.debug('%s started' % sys.argv[0], )
+
+log.debug('parsed options: %s' % _options, )
+
+
+################################################################################
+# CHECK ENVIRONMENT
+
+# FIXME: set the valid ssh directory, rename `ssh0` to `ssh`.
+SSH_CONFIG_DEFAULT = os.path.join(os.environ.get('HOME'), '.ssh0', 'config', )
+log.debug('the default ssh config file is `%s`' % SSH_CONFIG_DEFAULT, )
+
+# .ssh/config
+if _options.F is not None :
+    SSH_CONFIG = _options.F
+else :
+    SSH_CONFIG = SSH_CONFIG_DEFAULT
+
+log.debug('the given ssh config file is `%s`' % SSH_CONFIG, )
+
+if not os.path.isfile(SSH_CONFIG, ) :
+    log.error('the gvien ssh config, %s not found.' % SSH_CONFIG, )
+    if SSH_CONFIG != SSH_CONFIG_DEFAULT : # if not exist, create new config file
+        _parser.error('Can\'t open user config file %s: No such file or directory' % SSH_CONFIG, )
+    else :
+        _d = os.path.dirname(SSH_CONFIG, )
+        os.makedirs(_d, )
+        os.chmod(_d, 0700, )
+        with file(SSH_CONFIG, 'wb', ) as _f :
+            _f.write('', )
+
+
+# ssh executable
+SSH_EXECUTABLE = 'ssh'
+try :
+    _p = subprocess.Popen([SSH_EXECUTABLE, '-V', ], shell=False, stderr=subprocess.PIPE, )
+    _p.communicate()
+    if _p.returncode not in (0, ) :
+        raise OSError
+except (OSError, ), e :
+    log.error('`ssh` executable not found.', )
+    _parser.error('`ssh` executable not found.', )
+
+
+################################################################################
+# BASH COMPLETION: search hostnames by given keywrod
+if _options.bassh_comp :
+    # read config file
+    _arguments_raw = getattr(_options, 'ssh arguments', )[0]
+    _arguments = filter(string.strip, _arguments_raw.split())
+
+    _search_in_hostnames = not _arguments_raw.endswith(' ', )
+
+    _config_parsed = _ssh.Config(SSH_CONFIG, ).parse()
+
+    try :
+        _keyword = _arguments[1]
+    except IndexError :
+        print '**nothing**'
+        sys.exit(0, )
+    
+
+    # digg in hostnames
+    if _search_in_hostnames :
+        _found = list()
+        for i in _config_parsed.keys() :
+            if i.find(_keyword, ) < 0 :
+                continue
+
+            _found.append(i, )
+
+        _found.sort()
+
+        # search host
+        for i in _found :
+            print i,
+
+    # print host info
+    else :
+        print _config_parsed.get(_arguments[1], )
+
+    sys.exit(0, )
+
+
+
+################################################################################
+# RUN SSH
+_args = [SSH_EXECUTABLE, ] + sys.argv[1:]
+log.debug('execute: `%s`' % ' '.join(_args, ), )
+
+
+_p = subprocess.Popen(
+        _args,
+        shell=False,
+        #stderr=subprocess.STDOUT,
+        #stdout=subprocess.PIPE,
+        env=os.environ,
+    )
+_returncode = _p.wait()
+
+# $HOME/.bassh_history
+BASSH_HISTORY = os.path.join(os.environ.get('HOME'), '.bassh_history', )
+with file(BASSH_HISTORY, 'wa', ) as _f :
+    _writer = csv.writer(_f, dialect='excel', )
+    _writer.writerow(
+            (
+                    ' '.join(_args, ), # args
+                    datetime.datetime.now().isoformat(), # date
+                    _returncode,
+                ),
+        )
+
+log.debug('ssh session was exited, `%d`' % _returncode, )
+
+sys.exit(0, )
+
+
